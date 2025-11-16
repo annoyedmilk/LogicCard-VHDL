@@ -1,0 +1,38 @@
+# Generated synthesis outputs
+*.edif
+*.vcd
+*.vvp
+
+# GoConfigure build outputs
+goconfigure/**/build/
+goconfigure/**/ffpga/build/
+*.ffpga.bak
+*.bin
+
+# Yosys synthesis artifacts
+*.log
+*_synth.v
+post_synth_*.v
+post_synth_*.txt
+synth_script.ys
+
+# GHDL artifacts
+*.cf
+work-obj*.cf
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.old
+*.orig
