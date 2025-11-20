@@ -20,7 +20,7 @@ VHDL → GHDL/Yosys → EDIF → GoConfigure → Bitstream → Flash
 
 1. **OSS CAD Suite** (includes Yosys + GHDL)
    - Download from: https://github.com/YosysHQ/oss-cad-suite-build
-   - Install to: `~/oss-cad-suite/`
+   - Install to: `/opt/oss-cad-suite/`
 
 2. **GoConfigure** (Renesas ForgeFPGA Workshop)
    - Required for place-and-route and bitstream generation
@@ -37,26 +37,49 @@ VHDL → GHDL/Yosys → EDIF → GoConfigure → Bitstream → Flash
 
 ### Hardware Requirements
 
-- ForgeFPGA development board (e.g., LogicCard with SLG47910)
-- USB connection for programming
+- **LogicCard** - Compact FPGA development board featuring:
+  - Renesas SLG47910V FPGA (1120 LUTs, 1120 DFFs)
+  - CH552 microcontroller with serprog USB programming
+  - W25Q80 SPI Flash (1 Mbit)
+  - 15×7 Charlieplexed LED matrix (105 LEDs, 11 GPIO pins)
+  - 4 user buttons
+  - USB-powered
+  - **Hardware Design**: [github.com/annoyedmilk/LogicCard](https://github.com/annoyedmilk/LogicCard)
+- USB connection for programming via serprog/flashrom
 
 ## Project Structure
 
 ```
-test/
+LogicCard-VHDL/
 ├── vhdl/
-│   └── blink.vhd              # VHDL source files
+│   ├── blink.vhd                    # Simple LED blink demo
+│   └── DemoCharlieplexMatrix.vhd    # Charlieplex LED matrix (11 GPIO, 105 LEDs)
 ├── generated/
-│   ├── netlist.edif           # Generated EDIF netlist
-│   ├── post_synth_results.v   # Post-synthesis Verilog (for inspection)
-│   └── post_synth_report.txt  # Synthesis statistics
+│   ├── netlist.edif                 # Generated EDIF netlist (temp/working)
+│   ├── post_synth_results.v         # Post-synthesis Verilog (for inspection)
+│   ├── post_synth_report.txt        # Synthesis statistics
+│   └── synthesis.log                # Detailed synthesis log
 ├── goconfigure/
-│   └── blink/
-│       └── ffpga/build/bitstream/
-│           ├── FPGA_bitstream_FLASH_MEM.bin     # 48KB bitstream
-│           └── FPGA_bitstream_FLASH_MEM_1MB.bin # Padded for W25Q80
-├── synthesize_vhdl.sh         # VHDL synthesis script
-└── flash_bitstream.sh         # Bitstream flashing script
+│   ├── blink/                       # Blink demo GoConfigure project
+│   │   └── ffpga/
+│   │       ├── netlists/
+│   │       │   └── netlist.edif     # EDIF imported into GoConfigure
+│   │       ├── src/                 # Pin assignments and constraints
+│   │       └── build/
+│   │           └── bitstream/
+│   │               ├── FPGA_bitstream_FLASH_MEM.bin     # 48KB bitstream
+│   │               └── FPGA_bitstream_FLASH_MEM_1MB.bin # Padded for W25Q80
+│   └── charlieplex/                 # Charlieplex demo GoConfigure project
+│       └── ffpga/
+│           ├── netlists/
+│           │   └── netlist.edif     # EDIF imported into GoConfigure
+│           ├── src/                 # Pin assignments and constraints
+│           └── build/
+│               └── bitstream/
+│                   ├── FPGA_bitstream_FLASH_MEM.bin     # 48KB bitstream
+│                   └── FPGA_bitstream_FLASH_MEM_1MB.bin # Padded for W25Q80
+├── synthesize_vhdl.sh               # Universal VHDL synthesis script
+└── flash_bitstream.sh               # Universal bitstream flashing script
 ```
 
 ## Step-by-Step Workflow
@@ -90,10 +113,22 @@ test/
 
 ### Step 2: Synthesize VHDL to EDIF
 
-Run the synthesis script:
+Run the universal synthesis script:
 
 ```bash
-./synthesize_vhdl.sh
+./synthesize_vhdl.sh <vhdl_file> [top_module]
+```
+
+**Examples:**
+```bash
+# Synthesize blink demo (auto-detects top module)
+./synthesize_vhdl.sh blink.vhd
+
+# Synthesize charlieplex demo
+./synthesize_vhdl.sh DemoCharlieplexMatrix.vhd
+
+# Specify custom top module name
+./synthesize_vhdl.sh mydesign.vhd MyTopEntity
 ```
 
 **What this does:**
@@ -106,6 +141,7 @@ Run the synthesis script:
 - `generated/netlist.edif` - Import this into GoConfigure
 - `generated/post_synth_results.v` - For inspection
 - `generated/post_synth_report.txt` - Resource usage
+- `generated/synthesis.log` - Full synthesis log
 
 ### Step 3: Place and Route in GoConfigure
 
@@ -179,6 +215,44 @@ end process;
 
 **Solution:** Script automatically detects and uses `flatpak-spawn --host flashrom`.
 
+## Example Designs
+
+### 1. Blink Demo (blink.vhd)
+A simple LED blinking example demonstrating basic VHDL synthesis workflow.
+
+**Features:**
+- Single LED blink at configurable frequency
+- Internal oscillator usage
+- Basic clock divider
+- 2 GPIO pins (LED anode/cathode)
+
+### 2. Charlieplex LED Matrix Demo (DemoCharlieplexMatrix.vhd)
+Simple LED matrix controller using Charlieplexing technique with 4-button control.
+
+**Features:**
+- 11 GPIO pins controlling 105 LEDs (11×10 Charlieplex configuration)
+- Simple LED chase pattern from LED 0 to LED 104
+- 4 button controls:
+  - **BTN1**: Invert pattern (all LEDs except chase LED)
+  - **BTN2**: Speed up (5 speed levels)
+  - **BTN3**: Speed down
+  - **BTN4**: Pause/Play
+- Button debouncing (20ms) with edge detection
+- Configurable refresh rate (1 kHz default)
+
+**Resource Usage:**
+- **87 CLBs** (62.1% of 1K LUT FPGA)
+- **288 LUTs** utilized (51.4%)
+- **96 FFs** utilized (17.1%)
+- **Achievable frequency**: 99.721 MHz
+
+**Optimization Highlights:**
+- Explicit case statement for all 105 LEDs (no variable indexing)
+- Simple on/off LED control (no PWM for minimal resource usage)
+- No loops in synthesizable logic to prevent logic explosion
+- Flat architecture suitable for EDIF export
+- Successfully fits in 1K LUT FPGA
+
 ## Design Guidelines for ForgeFPGA VHDL
 
 ### DO:
@@ -186,21 +260,36 @@ end process;
 1. **Use flat designs** - Single entity with all logic inline
 2. **Add synthesis attributes** - Include `clkbuf_inhibit` and `iopad_external_pin` on all ports
 3. **Test synthesis output** - Check `post_synth_report.txt` for resource usage
+4. **Use explicit case statements** - For LED/pin mapping instead of variable indexing
+5. **Use simple pattern assignments** - Direct signal assignments instead of complex aggregates
+6. **Use subtraction-based wrapping** - For range limiting operations
 
 ### DON'T:
 
 1. **Don't use component instantiation** - Causes EDIF hierarchy issues
 2. **Don't skip synthesis attributes** - Missing attributes cause non-functional designs
 3. **Don't skip flattening** - Always use `-flatten` in synthesis
+4. **Don't use variable indexing** - `signal(variable_index)` creates massive multiplexers
+5. **Don't use variable `while` loops** - GHDL synthesis requires static loop conditions
+6. **Don't use `declare` blocks in processes** - Move variable declarations to process header
+7. **Don't use loops in synthesis** - Even `for` loops unroll and create huge logic
 
 
 ## References
 
+### Hardware
+- **LogicCard Hardware**: https://github.com/annoyedmilk/LogicCard
+  - Open-source hardware design files, schematics, and BOM
+  - CH552 serprog firmware for USB programming
+  - Pre-built Verilog examples with bitstreams
+  - SLG47910V FPGA datasheet and documentation
+
+### Software Tools
 - **Go Configure Software Hub**: https://www.renesas.com/en/software-tool/go-configure-software-hub
 - **OSS CAD Suite**: https://github.com/YosysHQ/oss-cad-suite-build
 - **GHDL**: https://github.com/ghdl/ghdl
 - **Yosys**: https://github.com/YosysHQ/yosys
-- **LogicCard**: https://github.com/annoyedmilk/LogicCard
+- **flashrom**: https://www.flashrom.org/
 
 ## License
 
@@ -215,3 +304,50 @@ A: Check `generated/post_synth_results.v` - it should be a flat module with no s
 **Q: Can I use libraries other than IEEE standard?**
 
 A: Stick to `IEEE.STD_LOGIC_1164` and `IEEE.NUMERIC_STD` for best compatibility.
+
+**Q: GHDL error: "loop condition must be static"**
+
+A: GHDL synthesis requires loop bounds to be known at compile time. Replace variable `while` loops with:
+- Fixed-iteration `for` loops with static bounds
+- Multiple `if` statements for small ranges
+- Successive subtraction for wrapping values to a specific range
+
+Example:
+```vhdl
+-- BAD: Variable while loop
+while value >= MAX_VALUE loop
+    value := value - MAX_VALUE;
+end loop;
+
+-- GOOD: Fixed for loop
+for i in 0 to 255 loop
+    if value >= MAX_VALUE then
+        value := value - MAX_VALUE;
+    end if;
+end loop;
+```
+
+**Q: GHDL error: "declaration not allowed within statements"**
+
+A: Don't use `declare` blocks inside case statements or if statements. Move all variable declarations to the top of the process.
+
+Example:
+```vhdl
+-- BAD: Declare block in case
+when 0 =>
+    declare
+        variable temp : integer;
+    begin
+        temp := some_value;
+    end;
+
+-- GOOD: Variable at process start
+process(clk)
+    variable temp : integer;
+begin
+    case pattern is
+        when 0 =>
+            temp := some_value;
+    end case;
+end process;
+```

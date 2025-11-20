@@ -1,15 +1,14 @@
 #!/bin/bash
 # ================================================================
-# FPGA Bitstream Padding and Flashing Script
+# Universal FPGA Bitstream Flash Programming Script
 # For ForgeFPGA with serprog/flashrom programming
+# Automatically discovers available projects in goconfigure/
 # ================================================================
 
 set -e  # Exit on error
 
 # Configuration
-GOCONFIGURE_DIR="./goconfigure/blink/ffpga/build/bitstream"
-BITSTREAM_48KB="$GOCONFIGURE_DIR/FPGA_bitstream_FLASH_MEM.bin"
-BITSTREAM_1MB="$GOCONFIGURE_DIR/FPGA_bitstream_FLASH_MEM_1MB.bin"
+GOCONFIGURE_BASE="./goconfigure"
 SERPROG_DEV="/dev/ttyACM0"
 FLASH_SIZE_MB=1
 
@@ -32,6 +31,99 @@ print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+# Discover available projects
+discover_projects() {
+    local projects=()
+    if [ -d "$GOCONFIGURE_BASE" ]; then
+        for dir in "$GOCONFIGURE_BASE"/*/ ; do
+            if [ -d "$dir" ]; then
+                project=$(basename "$dir")
+                # Check if it has the expected structure
+                if [ -f "$dir/ffpga/build/bitstream/FPGA_bitstream_FLASH_MEM.bin" ]; then
+                    projects+=("$project")
+                fi
+            fi
+        done
+    fi
+    echo "${projects[@]}"
+}
+
+# Show usage
+show_usage() {
+    local available_projects=($(discover_projects))
+
+    echo "Usage: $0 [project_name]"
+    echo ""
+    echo "Available projects:"
+    if [ ${#available_projects[@]} -eq 0 ]; then
+        echo "  (no projects found in $GOCONFIGURE_BASE)"
+    else
+        for proj in "${available_projects[@]}"; do
+            echo "  - $proj"
+        done
+    fi
+    echo ""
+    echo "If no project is specified, you will be prompted to choose."
+    echo ""
+}
+
+# Interactive project selection
+select_project() {
+    local projects=($(discover_projects))
+
+    if [ ${#projects[@]} -eq 0 ]; then
+        print_error "No projects found in $GOCONFIGURE_BASE/"
+        print_status "Please ensure you have built bitstreams in GoConfigure first"
+        exit 1
+    fi
+
+    if [ ${#projects[@]} -eq 1 ]; then
+        echo "${projects[0]}"
+        return
+    fi
+
+    echo "Available projects:"
+    for i in "${!projects[@]}"; do
+        printf "  %d) %s\n" $((i+1)) "${projects[$i]}"
+    done
+    echo ""
+
+    while true; do
+        read -p "Select project [1-${#projects[@]}]: " selection
+        if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "${#projects[@]}" ]; then
+            echo "${projects[$((selection-1))]}"
+            return
+        else
+            print_error "Invalid selection. Please enter a number between 1 and ${#projects[@]}"
+        fi
+    done
+}
+
+# Parse command line arguments
+if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
+    show_usage
+    exit 0
+fi
+
+if [ -n "$1" ]; then
+    PROJECT="$1"
+    # Validate project exists
+    if [ ! -d "$GOCONFIGURE_BASE/$PROJECT/ffpga/build/bitstream" ]; then
+        print_error "Project '$PROJECT' not found in $GOCONFIGURE_BASE/"
+        echo ""
+        show_usage
+        exit 1
+    fi
+else
+    # Interactive selection
+    PROJECT=$(select_project)
+fi
+
+# Set paths based on selected project
+GOCONFIGURE_DIR="$GOCONFIGURE_BASE/$PROJECT/ffpga/build/bitstream"
+BITSTREAM_48KB="$GOCONFIGURE_DIR/FPGA_bitstream_FLASH_MEM.bin"
+BITSTREAM_1MB="$GOCONFIGURE_DIR/FPGA_bitstream_FLASH_MEM_1MB.bin"
+
 # Check if 48KB bitstream exists
 if [ ! -f "$BITSTREAM_48KB" ]; then
     print_error "48KB bitstream not found: $BITSTREAM_48KB"
@@ -42,7 +134,7 @@ fi
 # Check bitstream size
 BITSTREAM_SIZE=$(stat -c%s "$BITSTREAM_48KB")
 EXPECTED_SIZE=49152  # 48KB = 48 * 1024 bytes
-print_status "Bitstream size: $BITSTREAM_SIZE bytes (expected: $EXPECTED_SIZE bytes)"
+print_status "Bitstream size: $BITSTREAM_SIZE bytes (expected: ~$EXPECTED_SIZE bytes)"
 
 if [ "$BITSTREAM_SIZE" -gt "$EXPECTED_SIZE" ]; then
     print_warning "Bitstream is larger than expected 48KB"
@@ -91,13 +183,16 @@ print_status "Using flashrom: $FLASHROM_CMD"
 # Check device permissions
 if [ ! -r "$SERPROG_DEV" ] || [ ! -w "$SERPROG_DEV" ]; then
     print_warning "No read/write permissions for $SERPROG_DEV"
-    print_status "You may need to run this script with sudo or add udev rules"
+    print_status "You may need to add yourself to the dialout group:"
+    print_status "  sudo usermod -a -G dialout \$USER"
+    print_status "  (then logout and login)"
 fi
 
 echo ""
 echo "========================================"
 echo "FPGA Bitstream Flash Programming"
 echo "========================================"
+echo "Project:        $PROJECT"
 echo "Source (48KB):  $BITSTREAM_48KB"
 echo "Padded (1MB):   $BITSTREAM_1MB"
 echo "Device:         $SERPROG_DEV"
@@ -126,6 +221,7 @@ if $FLASHROM_CMD -p serprog:dev="$SERPROG_DEV" -w "$BITSTREAM_1MB"; then
     echo "Programming Summary"
     echo "========================================"
     echo "Status:     SUCCESS"
+    echo "Project:    $PROJECT"
     echo "Bitstream:  $BITSTREAM_1MB"
     echo "Device:     $SERPROG_DEV"
     echo "========================================"
@@ -137,5 +233,6 @@ else
     print_status "  2. Verify serprog device: ls -l $SERPROG_DEV"
     print_status "  3. Check dmesg for USB errors"
     print_status "  4. Try reconnecting the device"
+    print_status "  5. Try again - sometimes one retry is all it takes"
     exit 1
 fi

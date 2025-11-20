@@ -1,24 +1,25 @@
 -- ================================================================
---  DEMO: Simple Blinking LED
---  Flat VHDL-2008 implementation (no component instantiation)
+--  Simple Blinking LED Demo
+--  Single LED controlled via anode/cathode pair
+--  Demonstrates basic clock divider and LED control for ForgeFPGA
 -- ================================================================
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
-entity DemoSimpleBlinking is
+entity blink is
     generic (
-        IN_CLK_HZ : positive := 50000000;
-        BLINK_HZ  : positive := 2
+        IN_CLK_HZ : positive := 50000000;  -- 50 MHz input clock
+        BLINK_HZ  : positive := 2          -- LED blink frequency
     );
     port (
         nreset : in  std_logic;
         clk    : in  std_logic;
         osc_en : out std_logic;
 
+        -- LED control signals (anode/cathode pair)
         led1_anode_oe   : out std_logic;
         led1_anode      : out std_logic;
-
         led1_cathode_oe : out std_logic;
         led1_cathode    : out std_logic
     );
@@ -26,7 +27,6 @@ entity DemoSimpleBlinking is
     -- Synthesis attributes for ForgeFPGA
     attribute clkbuf_inhibit : string;
     attribute iopad_external_pin : string;
-
     attribute clkbuf_inhibit of clk : signal is "true";
     attribute iopad_external_pin of clk : signal is "true";
     attribute iopad_external_pin of nreset : signal is "true";
@@ -36,38 +36,43 @@ entity DemoSimpleBlinking is
     attribute iopad_external_pin of led1_cathode_oe : signal is "true";
     attribute iopad_external_pin of led1_cathode : signal is "true";
 
-end entity DemoSimpleBlinking;
+end entity blink;
 
-architecture rtl of DemoSimpleBlinking is
+architecture rtl of blink is
 
-    constant CNT_MAX : natural := IN_CLK_HZ / (2 * BLINK_HZ) - 1;
-    constant CNT_WIDTH : natural := 24;
+    -- Clock divider
+    constant CNT_MAX : positive := IN_CLK_HZ / (2 * BLINK_HZ) - 1;
 
-    signal counter : unsigned(CNT_WIDTH-1 downto 0);
-    signal blink_signal : std_logic;
+    signal counter      : natural range 0 to CNT_MAX := 0;
+    signal blink_state  : std_logic := '0';
 
 begin
 
     -- Constant outputs
     osc_en <= '1';
+
+    -- LED output assignments
+    -- Anode is driven high/low for on/off, cathode is always pulled low
     led1_anode_oe   <= '1';
     led1_cathode_oe <= '1';
     led1_cathode    <= '0';
+    led1_anode      <= blink_state;
 
-    -- Blinking LED
-    led1_anode <= blink_signal;
-
-    -- Blinker logic (inlined, no component)
+    -- Main process
     process(clk)
     begin
         if rising_edge(clk) then
             if nreset = '0' then
-                counter <= (others => '0');
-                blink_signal <= '0';
+                -- Reset state
+                counter     <= 0;
+                blink_state <= '0';
             else
+                -- ============================================
+                -- Blink Counter
+                -- ============================================
                 if counter >= CNT_MAX then
-                    counter <= (others => '0');
-                    blink_signal <= not blink_signal;
+                    counter     <= 0;
+                    blink_state <= not blink_state;
                 else
                     counter <= counter + 1;
                 end if;
